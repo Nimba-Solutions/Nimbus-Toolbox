@@ -1,0 +1,601 @@
+<!--
+  @name         Nimbus Toolbox
+  @license      BSL 1.1 — See LICENSE.md
+  @description  Dashboard UI — launcher/manager for Cloud Nimbus desktop apps.
+  @author       Cloud Nimbus LLC
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nimbus Toolbox</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0e0b1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px 24px;
+      user-select: none;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header h1 { font-size: 22px; font-weight: 700; color: #fff; }
+    .header .subtitle { font-size: 12px; color: #7c6fa0; }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+
+    .btn {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: #7c3aed; color: #fff; }
+    .btn-primary:hover { background: #8b5cf6; }
+    .btn-ghost { background: transparent; color: #9ca3af; border: 1px solid #2d2640; }
+    .btn-ghost:hover { background: #1a1530; color: #fff; }
+    .btn-icon {
+      width: 32px; height: 32px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: none; cursor: pointer;
+      background: transparent; color: #7c6fa0; font-size: 16px;
+    }
+    .btn-icon:hover { background: #1a1530; color: #c4b5fd; }
+
+    /* System info strip */
+    .sys-strip {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: #5b4f7a;
+    }
+    .sys-strip span { display: flex; align-items: center; gap: 4px; }
+    .sys-val { color: #a78bfa; font-weight: 600; }
+
+    /* Tool grid */
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    /* Tool card */
+    .tool-card {
+      background: #13102a;
+      border: 1px solid #2d2640;
+      border-radius: 12px;
+      padding: 20px;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .tool-card:hover { border-color: #4c3d80; }
+    .tool-card .accent-bar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+
+    .tool-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .tool-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .tool-title { font-size: 16px; font-weight: 600; color: #fff; }
+    .tool-version {
+      font-size: 11px;
+      color: #5b4f7a;
+      font-family: monospace;
+      margin-left: 6px;
+    }
+    .tool-desc {
+      font-size: 13px;
+      color: #8b7fa8;
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    /* Status */
+    .tool-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.installed { background: #22c55e; }
+    .status-dot.not-installed { background: #6b7280; }
+    .status-dot.needs-install { background: #f59e0b; }
+    .status-text {
+      font-size: 12px;
+      color: #7c6fa0;
+    }
+
+    /* Features */
+    .tool-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+    .feature-tag {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      background: #1a1530;
+      color: #7c6fa0;
+      border: 1px solid #2d2640;
+    }
+
+    /* Actions */
+    .tool-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tool-actions .btn { font-size: 12px; padding: 5px 12px; }
+    .btn-launch { background: #7c3aed; color: #fff; }
+    .btn-launch:hover { background: #8b5cf6; }
+    .btn-launch:disabled { background: #3b2d60; color: #5b4f7a; cursor: not-allowed; }
+    .btn-secondary { background: #1a1530; color: #a78bfa; border: 1px solid #2d2640; }
+    .btn-secondary:hover { background: #231d40; }
+    .btn-clone { background: #065f46; color: #6ee7b7; }
+    .btn-clone:hover { background: #047857; }
+
+    /* Admin badge */
+    .admin-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: #7f1d1d;
+      color: #fca5a5;
+      margin-left: 6px;
+    }
+
+    /* Settings overlay */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+    }
+    .modal-overlay.open { display: flex; align-items: center; justify-content: center; }
+    .modal {
+      background: #13102a;
+      border: 1px solid #2d2640;
+      border-radius: 12px;
+      padding: 24px;
+      width: 480px;
+      max-width: 90vw;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h2 { font-size: 16px; margin-bottom: 16px; color: #fff; }
+    .modal h3 { font-size: 13px; color: #a78bfa; margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .setting-label { font-size: 13px; color: #c4b5fd; }
+    .toggle {
+      position: relative; width: 40px; height: 22px; cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0;
+      background: #374151; border-radius: 22px;
+      transition: 0.2s;
+    }
+    .toggle .slider:before {
+      content: '';
+      position: absolute;
+      height: 16px; width: 16px;
+      left: 3px; bottom: 3px;
+      background: #9ca3af;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider { background: #7c3aed; }
+    .toggle input:checked + .slider:before {
+      transform: translateX(18px);
+      background: #c4b5fd;
+    }
+
+    .scan-path {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #1a1530;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      color: #8b7fa8;
+    }
+    .scan-path .remove-path {
+      cursor: pointer;
+      color: #6b7280;
+      font-size: 14px;
+    }
+    .scan-path .remove-path:hover { color: #f87171; }
+    .scan-path.default { opacity: 0.6; }
+
+    .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+    /* Loading overlay */
+    .loading {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(14,11,26,0.85);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .loading.show { display: flex; }
+    .loading-text { font-size: 14px; color: #a78bfa; }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #2d2640;
+      border-top-color: #7c3aed;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px; right: 20px;
+      background: #2d1b69;
+      color: #c4b5fd;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      z-index: 999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* Branding */
+    .branding {
+      text-align: center;
+      margin-top: 14px;
+      font-size: 11px;
+      color: #2d2640;
+    }
+    .branding a { color: #3b3060; text-decoration: none; }
+    .branding a:hover { color: #7c6fa0; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div>
+        <h1>Nimbus Toolbox</h1>
+        <div class="subtitle">Cloud Nimbus Desktop Suite</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-primary" onclick="rescan()">Scan</button>
+      <button class="btn-icon" onclick="openSettings()" title="Settings">&#9881;</button>
+    </div>
+  </div>
+
+  <!-- System Info -->
+  <div class="sys-strip" id="sysStrip"></div>
+
+  <!-- Tool Grid -->
+  <div class="tool-grid" id="toolGrid"></div>
+
+  <!-- Branding -->
+  <div class="branding">
+    Powered by <a href="https://cloudnimbusllc.com" target="_blank">Cloud Nimbus LLC</a>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h2>Settings</h2>
+
+      <div class="setting-row">
+        <span class="setting-label">Start minimized to tray</span>
+        <label class="toggle">
+          <input type="checkbox" id="settMinimized">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <h3>Scan Directories</h3>
+      <p style="font-size:12px;color:#5b4f7a;margin-bottom:8px;">Toolbox scans these folders to discover installed Cloud Nimbus apps.</p>
+      <div id="scanPathsList"></div>
+      <button class="btn btn-secondary" style="margin-top:8px;width:100%" onclick="addScanPath()">+ Add Folder</button>
+
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Working...</div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+<script>
+  let tools = [];
+  let pendingScanPaths = { defaults: [], custom: [] };
+
+  // --- Init ---
+  async function init() {
+    await updateSysInfo();
+    tools = await window.api.scanTools();
+    renderTools();
+  }
+
+  // --- System Info ---
+  async function updateSysInfo() {
+    const sys = await window.api.getSystem();
+    const usedMem = (sys.totalMemGb - sys.freeMemGb).toFixed(1);
+    document.getElementById('sysStrip').innerHTML = `
+      <span>${sys.username}@${sys.hostname}</span>
+      <span>Windows <span class="sys-val">${sys.release}</span></span>
+      <span>CPUs <span class="sys-val">${sys.cpus}</span></span>
+      <span>Memory <span class="sys-val">${usedMem} / ${sys.totalMemGb} GB</span></span>
+    `;
+  }
+
+  // --- Render ---
+  function renderTools() {
+    const grid = document.getElementById('toolGrid');
+
+    grid.innerHTML = tools.map(t => {
+      let statusDot, statusText;
+      if (t.installed && t.hasNodeModules) {
+        statusDot = 'installed';
+        statusText = `v${t.version} — Ready`;
+      } else if (t.installed && !t.hasNodeModules) {
+        statusDot = 'needs-install';
+        statusText = `v${t.version} — Needs npm install`;
+      } else {
+        statusDot = 'not-installed';
+        statusText = 'Not installed locally';
+      }
+
+      const canLaunch = t.installed && t.hasNodeModules;
+      const pathDisplay = t.localPath ? `<div style="font-size:11px;font-family:monospace;color:#4b3f6a;margin-top:4px;word-break:break-all">${esc(t.localPath)}</div>` : '';
+
+      return `<div class="tool-card">
+        <div class="accent-bar" style="background:${t.color}"></div>
+        <div class="tool-header">
+          <div class="tool-icon" style="background:${t.color}">${t.icon}</div>
+          <div>
+            <span class="tool-title">${esc(t.name)}</span>
+            ${t.version ? `<span class="tool-version">v${t.version}</span>` : ''}
+            ${t.requiresAdmin ? '<span class="admin-badge">Admin</span>' : ''}
+          </div>
+        </div>
+        <div class="tool-desc">${esc(t.description)}</div>
+        <div class="tool-status">
+          <span class="status-dot ${statusDot}"></span>
+          <span class="status-text">${statusText}</span>
+        </div>
+        <div class="tool-features">
+          ${(t.features || []).map(f => `<span class="feature-tag">${esc(f)}</span>`).join('')}
+        </div>
+        ${pathDisplay}
+        <div class="tool-actions" style="margin-top:10px">
+          ${canLaunch
+            ? `<button class="btn btn-launch" onclick="launch('${t.id}')">Launch</button>`
+            : `<button class="btn btn-launch" disabled>Launch</button>`
+          }
+          ${t.installed
+            ? `
+              <button class="btn btn-secondary" onclick="openFolder('${t.id}')" title="Open in Explorer">Folder</button>
+              <button class="btn btn-secondary" onclick="openTerminal('${t.id}')" title="Open terminal here">Terminal</button>
+              ${!t.hasNodeModules ? `<button class="btn btn-clone" onclick="npmInstall('${t.id}')">npm install</button>` : ''}
+              ${t.hasNodeModules && !t.hasDist ? `<button class="btn btn-secondary" onclick="buildApp('${t.id}')">Build .exe</button>` : ''}
+            `
+            : `<button class="btn btn-clone" onclick="cloneTool('${t.id}')">Clone & Install</button>`
+          }
+          <button class="btn btn-secondary" onclick="openRepo('${esc(t.repo)}')">GitHub</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // --- Actions ---
+  async function launch(id) {
+    const result = await window.api.launchTool(id);
+    if (result.status === 'ok') {
+      showToast(`Launched ${result.name}`);
+    } else {
+      showToast('Error: ' + result.message);
+    }
+  }
+
+  async function openFolder(id) { await window.api.openFolder(id); }
+  async function openTerminal(id) { await window.api.openTerminal(id); }
+  async function openRepo(url) { await window.api.openRepo(url); }
+
+  async function npmInstall(id) {
+    showLoading('Running npm install...');
+    const result = await window.api.installDeps(id);
+    hideLoading();
+    if (result.status === 'ok') {
+      showToast('Dependencies installed');
+      tools = await window.api.getTools();
+      renderTools();
+    } else {
+      showToast('Error: ' + result.message);
+    }
+  }
+
+  async function buildApp(id) {
+    showLoading('Building portable .exe...');
+    const result = await window.api.buildTool(id);
+    hideLoading();
+    if (result.status === 'ok') {
+      showToast('Build complete — check dist/ folder');
+      tools = await window.api.getTools();
+      renderTools();
+    } else {
+      showToast('Build failed: ' + result.message);
+    }
+  }
+
+  async function cloneTool(id) {
+    showLoading('Cloning repository...');
+    const result = await window.api.cloneTool(id);
+    if (result.status !== 'ok') {
+      hideLoading();
+      showToast('Clone failed: ' + result.message);
+      return;
+    }
+
+    // Auto npm install after clone
+    showLoadingText('Running npm install...');
+    tools = await window.api.scanTools();
+    const tool = tools.find(t => t.id === id);
+    if (tool && tool.installed && !tool.hasNodeModules) {
+      await window.api.installDeps(id);
+      tools = await window.api.scanTools();
+    }
+
+    hideLoading();
+    renderTools();
+    showToast('Tool installed and ready');
+  }
+
+  async function rescan() {
+    tools = await window.api.scanTools();
+    renderTools();
+    showToast(`Found ${tools.filter(t => t.installed).length} of ${tools.length} tools`);
+  }
+
+  // --- Settings ---
+  async function openSettings() {
+    const s = await window.api.getSettings();
+    document.getElementById('settMinimized').checked = !!s.startMinimized;
+    pendingScanPaths = await window.api.getScanPaths();
+    renderScanPaths();
+    document.getElementById('settingsModal').classList.add('open');
+  }
+
+  function renderScanPaths() {
+    const list = document.getElementById('scanPathsList');
+    const defaultHtml = pendingScanPaths.defaults.map(p =>
+      `<div class="scan-path default"><span>${esc(p)}</span><span style="font-size:10px;color:#5b4f7a">default</span></div>`
+    ).join('');
+    const customHtml = pendingScanPaths.custom.map(p =>
+      `<div class="scan-path"><span>${esc(p)}</span><span class="remove-path" onclick="removeScanPath('${esc(p)}')">&times;</span></div>`
+    ).join('');
+    list.innerHTML = defaultHtml + customHtml;
+  }
+
+  async function addScanPath() {
+    const p = await window.api.addScanPath();
+    if (p) {
+      pendingScanPaths = await window.api.getScanPaths();
+      renderScanPaths();
+    }
+  }
+
+  async function removeScanPath(p) {
+    await window.api.removeScanPath(p);
+    pendingScanPaths = await window.api.getScanPaths();
+    renderScanPaths();
+  }
+
+  async function saveSettings() {
+    await window.api.saveSettings({
+      startMinimized: document.getElementById('settMinimized').checked,
+    });
+    closeSettings();
+    showToast('Settings saved');
+  }
+
+  function closeSettings() {
+    document.getElementById('settingsModal').classList.remove('open');
+  }
+
+  // --- Helpers ---
+  function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/\\/g, '\\\\'); }
+
+  function showLoading(text) {
+    document.getElementById('loadingText').textContent = text || 'Working...';
+    document.getElementById('loading').classList.add('show');
+  }
+  function showLoadingText(text) {
+    document.getElementById('loadingText').textContent = text;
+  }
+  function hideLoading() {
+    document.getElementById('loading').classList.remove('show');
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // Close modals on outside click
+  document.querySelectorAll('.modal-overlay').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target === el) el.classList.remove('open');
+    });
+  });
+
+  // --- Start ---
+  init();
+</script>
+</body>
+</html>
