@@ -343,13 +343,13 @@ async function launchToolAdmin(toolId) {
   usage[toolId].lastLaunched = new Date().toISOString();
   store.set('usage', usage);
 
-  // Find electron path
-  const electronPath = path.join(tool.localPath, 'node_modules', '.bin', 'electron.cmd');
-  const electronExe = fs.existsSync(electronPath) ? electronPath : 'npx electron';
-
-  // Launch elevated via PowerShell Start-Process -Verb RunAs
+  // Launch elevated: write a temp .bat and use Start-Process -Verb RunAs on it
   return new Promise((resolve) => {
-    const psCmd = `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -Command "cd ''${tool.localPath.replace(/'/g, "''")}'' ; npx electron ."'`;
+    const batPath = path.join(app.getPath('temp'), `nimbus-admin-${toolId}.bat`);
+    const batContent = `@echo off\r\ncd /d "${tool.localPath}"\r\nnpx electron .\r\n`;
+    fs.writeFileSync(batPath, batContent);
+
+    const psCmd = `Start-Process cmd.exe -Verb RunAs -ArgumentList '/c "${batPath}"'`;
     exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
       if (err) {
         resolve({ status: 'error', message: err.message });
