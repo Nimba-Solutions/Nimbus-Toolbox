@@ -377,8 +377,18 @@
       </div>
     </div>
     <div class="header-right">
+      <button class="btn btn-secondary" onclick="updateAll()" id="updateAllBtn" title="Git pull all tools">Update All</button>
       <button class="btn btn-primary" onclick="rescan()">Scan</button>
       <button class="btn-icon" onclick="openSettings()" title="Settings">&#9881;</button>
+    </div>
+  </div>
+
+  <!-- Self-update banner -->
+  <div id="updateBanner" style="display:none; background:#1a1440; border:1px solid #6d28d9; border-radius:8px; padding:10px 16px; margin-bottom:12px; display:none; align-items:center; justify-content:space-between;">
+    <span style="font-size:13px; color:#c4b5fd;">A new version of Nimbus Toolbox is available!</span>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="selfUpdate()" id="selfUpdateBtn" style="background:#7c3aed; font-size:12px; padding:5px 14px;">Update & Restart</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('updateBanner').style.display='none'" style="font-size:12px; padding:5px 10px;">Later</button>
     </div>
   </div>
 
@@ -449,6 +459,14 @@
     tools = await window.api.scanTools();
     usageData = await window.api.getUsage();
     renderTools();
+
+    // Check for self-update (in case main process event fired before renderer was ready)
+    const updateCheck = await window.api.checkSelfUpdate();
+    if (updateCheck.available) {
+      const banner = document.getElementById('updateBanner');
+      banner.style.display = 'flex';
+      banner.querySelector('span').textContent = `A new version of Nimbus Toolbox is available! (${updateCheck.behind} commit${updateCheck.behind > 1 ? 's' : ''} behind)`;
+    }
   }
 
   // --- System Info ---
@@ -567,7 +585,8 @@
         ${pathDisplay}
         <div class="tool-actions" style="margin-top:10px">
           ${canLaunch
-            ? `<button class="btn btn-launch" onclick="launch('${t.id}')">Launch</button>`
+            ? `<button class="btn btn-launch" onclick="launch('${t.id}')">Launch</button>
+               ${t.requiresAdmin ? `<button class="btn btn-launch" onclick="launchAdmin('${t.id}')" style="background:#b45309" title="Launch with elevated privileges">Run as Admin</button>` : ''}`
             : `<button class="btn btn-launch" disabled>Launch</button>`
           }
           ${t.installed
@@ -587,10 +606,48 @@
 
   // --- Actions ---
   async function launch(id) {
+    showToast('Updating & launching...');
     const result = await window.api.launchTool(id);
     if (result.status === 'ok') {
-      showToast(`Launched ${result.name}`);
+      const msg = result.updated ? `Updated & launched ${result.name}` : `Launched ${result.name}`;
+      showToast(msg);
       usageData = await window.api.getUsage();
+      tools = await window.api.getTools();
+      renderTools();
+    } else {
+      showToast('Error: ' + result.message);
+    }
+  }
+
+  async function updateAll() {
+    const btn = document.getElementById('updateAllBtn');
+    btn.disabled = true;
+    btn.textContent = 'Updating...';
+    try {
+      const results = await window.api.updateAll();
+      const updated = results.filter(r => r.updated);
+      if (updated.length > 0) {
+        showToast(`Updated ${updated.length} tool(s): ${updated.map(r => r.name).join(', ')}`);
+        tools = await window.api.getTools();
+        renderTools();
+      } else {
+        showToast('All tools already up to date');
+      }
+    } catch (e) {
+      showToast('Update error: ' + e.message);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Update All';
+  }
+
+  async function launchAdmin(id) {
+    showToast('Updating & launching as Admin...');
+    const result = await window.api.launchToolAdmin(id);
+    if (result.status === 'ok') {
+      const msg = result.updated ? `Updated & launched ${result.name} as Admin` : `Launched ${result.name} as Admin`;
+      showToast(msg);
+      usageData = await window.api.getUsage();
+      tools = await window.api.getTools();
       renderTools();
     } else {
       showToast('Error: ' + result.message);
@@ -649,6 +706,36 @@
     renderTools();
     showToast('Tool installed and ready');
   }
+
+  async function selfUpdate() {
+    const btn = document.getElementById('selfUpdateBtn');
+    btn.disabled = true;
+    btn.textContent = 'Updating...';
+    try {
+      const result = await window.api.selfUpdate();
+      if (result.status === 'updated') {
+        btn.textContent = 'Restarting...';
+        showToast('Updated! Restarting...');
+        setTimeout(() => window.api.restartApp(), 1000);
+      } else {
+        btn.textContent = 'Update & Restart';
+        btn.disabled = false;
+        showToast('Already up to date');
+        document.getElementById('updateBanner').style.display = 'none';
+      }
+    } catch (e) {
+      btn.textContent = 'Update & Restart';
+      btn.disabled = false;
+      showToast('Update failed: ' + e.message);
+    }
+  }
+
+  // Listen for update notification from main process
+  window.api.onSelfUpdateAvailable((behind) => {
+    const banner = document.getElementById('updateBanner');
+    banner.style.display = 'flex';
+    banner.querySelector('span').textContent = `A new version of Nimbus Toolbox is available! (${behind} commit${behind > 1 ? 's' : ''} behind)`;
+  });
 
   async function rescan() {
     tools = await window.api.scanTools();

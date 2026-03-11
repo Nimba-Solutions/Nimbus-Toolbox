@@ -250,6 +250,28 @@ function scanForTools() {
   return found;
 }
 
+// --- Auto-update (git pull) ---
+
+function updateTool(toolPath) {
+  return new Promise((resolve) => {
+    // Check if it's a git repo first
+    const gitDir = path.join(toolPath, '.git');
+    if (!fs.existsSync(gitDir)) {
+      return resolve({ updated: false, reason: 'not a git repo' });
+    }
+
+    exec(`cd /d "${toolPath}" && git pull --ff-only 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+      if (err) {
+        resolve({ updated: false, reason: err.message });
+      } else if (stdout.includes('Already up to date')) {
+        resolve({ updated: false, reason: 'already up to date' });
+      } else {
+        resolve({ updated: true, output: stdout.trim() });
+      }
+    });
+  });
+}
+
 // --- Tool launching ---
 
 async function launchTool(toolId) {
@@ -262,6 +284,17 @@ async function launchTool(toolId) {
   // Check if node_modules exist
   if (!tool.hasNodeModules) {
     return { status: 'error', message: 'Run npm install first in ' + tool.localPath };
+  }
+
+  // Auto-update before launch
+  const updateResult = await updateTool(tool.localPath);
+
+  // If updated, re-install deps in case package.json changed
+  if (updateResult.updated) {
+    await new Promise((resolve) => {
+      exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+    });
+    scanForTools(); // refresh tool list
   }
 
   // Track usage
@@ -280,7 +313,50 @@ async function launchTool(toolId) {
       }
     });
     // Don't wait for exit — resolve immediately
-    setTimeout(() => resolve({ status: 'ok', name: tool.name }), 1000);
+    setTimeout(() => resolve({ status: 'ok', name: tool.name, updated: updateResult.updated, updateOutput: updateResult.output || updateResult.reason }), 1500);
+  });
+}
+
+async function launchToolAdmin(toolId) {
+  const tools = store.get('tools', []);
+  const tool = tools.find(t => t.id === toolId);
+  if (!tool || !tool.installed || !tool.localPath) {
+    return { status: 'error', message: 'Tool not installed locally' };
+  }
+  if (!tool.hasNodeModules) {
+    return { status: 'error', message: 'Run npm install first in ' + tool.localPath };
+  }
+
+  // Auto-update before launch
+  const updateResult = await updateTool(tool.localPath);
+  if (updateResult.updated) {
+    await new Promise((resolve) => {
+      exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+    });
+    scanForTools();
+  }
+
+  // Track usage
+  const usage = store.get('usage', {});
+  if (!usage[toolId]) usage[toolId] = { launches: 0, lastLaunched: null };
+  usage[toolId].launches++;
+  usage[toolId].lastLaunched = new Date().toISOString();
+  store.set('usage', usage);
+
+  // Find electron path
+  const electronPath = path.join(tool.localPath, 'node_modules', '.bin', 'electron.cmd');
+  const electronExe = fs.existsSync(electronPath) ? electronPath : 'npx electron';
+
+  // Launch elevated via PowerShell Start-Process -Verb RunAs
+  return new Promise((resolve) => {
+    const psCmd = `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -Command "cd ''${tool.localPath.replace(/'/g, "''")}'' ; npx electron ."'`;
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
+      if (err) {
+        resolve({ status: 'error', message: err.message });
+        return;
+      }
+    });
+    setTimeout(() => resolve({ status: 'ok', name: tool.name, admin: true, updated: updateResult.updated }), 1500);
   });
 }
 
@@ -390,6 +466,7 @@ ipcMain.handle('get-tools', () => store.get('tools', []));
 ipcMain.handle('get-catalog', () => CATALOG);
 
 ipcMain.handle('launch-tool', (_, id) => launchTool(id));
+ipcMain.handle('launch-tool-admin', (_, id) => launchToolAdmin(id));
 ipcMain.handle('open-folder', (_, id) => openFolder(id));
 ipcMain.handle('open-terminal', (_, id) => openTerminal(id));
 ipcMain.handle('install-deps', (_, id) => installDeps(id));
@@ -409,6 +486,26 @@ ipcMain.handle('get-settings', () => store.get('settings'));
 ipcMain.handle('save-settings', (_, settings) => {
   store.set('settings', settings);
   return { status: 'ok' };
+});
+
+ipcMain.handle('update-tool', async (_, id) => {
+  const tools = store.get('tools', []);
+  const tool = tools.find(t => t.id === id);
+  if (!tool || !tool.localPath) return { status: 'error', message: 'Not installed' };
+  const result = await updateTool(tool.localPath);
+  if (result.updated) scanForTools();
+  return { status: 'ok', ...result };
+});
+
+ipcMain.handle('update-all', async () => {
+  const tools = store.get('tools', []).filter(t => t.installed && t.localPath);
+  const results = [];
+  for (const tool of tools) {
+    const result = await updateTool(tool.localPath);
+    results.push({ id: tool.id, name: tool.name, ...result });
+  }
+  scanForTools();
+  return results;
 });
 
 ipcMain.handle('get-scan-paths', () => ({
@@ -436,6 +533,46 @@ ipcMain.handle('remove-scan-path', (_, p) => {
   return { status: 'ok' };
 });
 
+// --- Self-update ---
+
+function checkSelfUpdate() {
+  const toolboxDir = app.getAppPath();
+  // Only works if running from a git repo (dev mode / cloned)
+  const gitDir = path.join(toolboxDir, '.git');
+  if (!fs.existsSync(gitDir)) return Promise.resolve({ available: false, reason: 'not a git repo' });
+
+  return new Promise((resolve) => {
+    // Fetch remote and check if we're behind
+    exec(`cd /d "${toolboxDir}" && git fetch origin 2>&1 && git rev-list HEAD..origin/master --count 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+      if (err) return resolve({ available: false, reason: err.message });
+      const lines = stdout.trim().split('\n');
+      const behind = parseInt(lines[lines.length - 1]) || 0;
+      resolve({ available: behind > 0, behind });
+    });
+  });
+}
+
+ipcMain.handle('check-self-update', () => checkSelfUpdate());
+
+ipcMain.handle('self-update', async () => {
+  const toolboxDir = app.getAppPath();
+  const result = await updateTool(toolboxDir);
+  if (!result.updated) return { status: 'no-update', reason: result.reason };
+
+  // Re-install deps if needed
+  await new Promise((resolve) => {
+    exec(`cd /d "${toolboxDir}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+  });
+
+  return { status: 'updated', output: result.output };
+});
+
+ipcMain.handle('restart-app', () => {
+  app.relaunch();
+  app.isQuitting = true;
+  app.quit();
+});
+
 // --- App lifecycle ---
 
 app.whenReady().then(() => {
@@ -443,6 +580,13 @@ app.whenReady().then(() => {
 
   // Initial scan
   scanForTools();
+
+  // Check for self-update in background
+  checkSelfUpdate().then(result => {
+    if (result.available && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('self-update-available', result.behind);
+    }
+  });
 
   const settings = store.get('settings');
   if (!settings.startMinimized) {
