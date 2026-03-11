@@ -14,9 +14,11 @@ const store = new Store({
   defaults: {
     tools: [],        // discovered/registered tools
     scanPaths: [],    // directories to scan for tools
+    usage: {},        // { toolId: { launches: 0, lastLaunched: null } }
     settings: {
       startMinimized: false,
       autoScan: true,
+      sortBy: 'usage', // 'usage', 'name', 'status'
     },
   },
 });
@@ -92,6 +94,17 @@ const CATALOG = [
     icon: 'SS',
     requiresAdmin: true,
     features: ['Registry scanning', 'Enable/disable', 'Startup folder', 'Add/remove', 'Impact info'],
+  },
+  {
+    id: 'resource-governor',
+    name: 'Resource Governor',
+    description: 'Unified bandwidth, CPU, and memory governor — combines Bandwidth Governor + Process Governor.',
+    repo: 'https://github.com/Nimba-Solutions/Resource-Governor',
+    packageName: 'resource-governor',
+    color: '#4f46e5',
+    icon: 'RG',
+    requiresAdmin: true,
+    features: ['Bandwidth QoS', 'CPU affinity', 'Memory caps', 'Speed test', 'Claude Code integration', 'Presets'],
   },
 ];
 
@@ -251,6 +264,13 @@ async function launchTool(toolId) {
     return { status: 'error', message: 'Run npm install first in ' + tool.localPath };
   }
 
+  // Track usage
+  const usage = store.get('usage', {});
+  if (!usage[toolId]) usage[toolId] = { launches: 0, lastLaunched: null };
+  usage[toolId].launches++;
+  usage[toolId].lastLaunched = new Date().toISOString();
+  store.set('usage', usage);
+
   // Launch with electron
   return new Promise((resolve) => {
     const cmd = `cd /d "${tool.localPath}" && npx electron .`;
@@ -378,6 +398,13 @@ ipcMain.handle('clone-tool', (_, id) => cloneTool(id));
 ipcMain.handle('open-repo', (_, url) => { shell.openExternal(url); return { status: 'ok' }; });
 
 ipcMain.handle('get-system', () => getSystemSummary());
+ipcMain.handle('get-usage', () => store.get('usage', {}));
+ipcMain.handle('reset-usage', (_, id) => {
+  const usage = store.get('usage', {});
+  if (id) { delete usage[id]; } else { Object.keys(usage).forEach(k => delete usage[k]); }
+  store.set('usage', usage);
+  return { status: 'ok' };
+});
 ipcMain.handle('get-settings', () => store.get('settings'));
 ipcMain.handle('save-settings', (_, settings) => {
   store.set('settings', settings);

@@ -297,6 +297,64 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
 
+    /* Search & sort bar */
+    .search-sort-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      align-items: center;
+    }
+    .search-input {
+      flex: 1;
+      padding: 8px 14px;
+      background: #13102a;
+      border: 1px solid #2d2640;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 13px;
+      outline: none;
+    }
+    .search-input:focus { border-color: #7c3aed; }
+    .search-input::placeholder { color: #5b4f7a; }
+    .sort-select {
+      padding: 8px 12px;
+      background: #13102a;
+      border: 1px solid #2d2640;
+      border-radius: 8px;
+      color: #a78bfa;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+    .sort-select:focus { border-color: #7c3aed; }
+    .sort-select option { background: #13102a; color: #e0e0e0; }
+
+    /* Usage stats on card */
+    .usage-stats {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: #5b4f7a;
+      margin-bottom: 8px;
+    }
+    .usage-stats .stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .usage-stats .stat-num {
+      color: #a78bfa;
+      font-weight: 600;
+    }
+
+    /* No results */
+    .no-results {
+      text-align: center;
+      padding: 40px;
+      color: #5b4f7a;
+      font-size: 14px;
+    }
+
     /* Branding */
     .branding {
       text-align: center;
@@ -326,6 +384,17 @@
 
   <!-- System Info -->
   <div class="sys-strip" id="sysStrip"></div>
+
+  <!-- Search & Sort -->
+  <div class="search-sort-bar">
+    <input type="text" class="search-input" id="searchInput" placeholder="Search tools by name, feature, or description..." oninput="renderTools()">
+    <select class="sort-select" id="sortSelect" onchange="renderTools()">
+      <option value="usage">Most Used</option>
+      <option value="recent">Recently Used</option>
+      <option value="name">Name A-Z</option>
+      <option value="status">Status (Ready First)</option>
+    </select>
+  </div>
 
   <!-- Tool Grid -->
   <div class="tool-grid" id="toolGrid"></div>
@@ -371,12 +440,14 @@
 
 <script>
   let tools = [];
+  let usageData = {};
   let pendingScanPaths = { defaults: [], custom: [] };
 
   // --- Init ---
   async function init() {
     await updateSysInfo();
     tools = await window.api.scanTools();
+    usageData = await window.api.getUsage();
     renderTools();
   }
 
@@ -392,11 +463,69 @@
     `;
   }
 
+  // --- Search & Sort ---
+  function getFilteredSortedTools() {
+    const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    const sortBy = document.getElementById('sortSelect')?.value || 'usage';
+
+    let filtered = tools;
+    if (search) {
+      filtered = tools.filter(t =>
+        t.name.toLowerCase().includes(search) ||
+        t.description.toLowerCase().includes(search) ||
+        (t.features || []).some(f => f.toLowerCase().includes(search)) ||
+        t.id.includes(search)
+      );
+    }
+
+    const sorted = [...filtered].sort((a, b) => {
+      const ua = usageData[a.id] || { launches: 0, lastLaunched: null };
+      const ub = usageData[b.id] || { launches: 0, lastLaunched: null };
+
+      switch (sortBy) {
+        case 'usage':
+          return ub.launches - ua.launches;
+        case 'recent':
+          const da = ua.lastLaunched ? new Date(ua.lastLaunched).getTime() : 0;
+          const db = ub.lastLaunched ? new Date(ub.lastLaunched).getTime() : 0;
+          return db - da;
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'status':
+          const sa = a.installed && a.hasNodeModules ? 0 : a.installed ? 1 : 2;
+          const sb = b.installed && b.hasNodeModules ? 0 : b.installed ? 1 : 2;
+          return sa - sb;
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }
+
+  function formatTimeAgo(isoStr) {
+    if (!isoStr) return 'Never';
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  }
+
   // --- Render ---
   function renderTools() {
     const grid = document.getElementById('toolGrid');
+    const sorted = getFilteredSortedTools();
 
-    grid.innerHTML = tools.map(t => {
+    if (sorted.length === 0) {
+      grid.innerHTML = '<div class="no-results">No tools match your search.</div>';
+      return;
+    }
+
+    grid.innerHTML = sorted.map(t => {
       let statusDot, statusText;
       if (t.installed && t.hasNodeModules) {
         statusDot = 'installed';
@@ -409,6 +538,7 @@
         statusText = 'Not installed locally';
       }
 
+      const usage = usageData[t.id] || { launches: 0, lastLaunched: null };
       const canLaunch = t.installed && t.hasNodeModules;
       const pathDisplay = t.localPath ? `<div style="font-size:11px;font-family:monospace;color:#4b3f6a;margin-top:4px;word-break:break-all">${esc(t.localPath)}</div>` : '';
 
@@ -421,6 +551,10 @@
             ${t.version ? `<span class="tool-version">v${t.version}</span>` : ''}
             ${t.requiresAdmin ? '<span class="admin-badge">Admin</span>' : ''}
           </div>
+        </div>
+        <div class="usage-stats">
+          <span class="stat">Launches: <span class="stat-num">${usage.launches}</span></span>
+          <span class="stat">Last used: <span class="stat-num">${formatTimeAgo(usage.lastLaunched)}</span></span>
         </div>
         <div class="tool-desc">${esc(t.description)}</div>
         <div class="tool-status">
@@ -456,6 +590,8 @@
     const result = await window.api.launchTool(id);
     if (result.status === 'ok') {
       showToast(`Launched ${result.name}`);
+      usageData = await window.api.getUsage();
+      renderTools();
     } else {
       showToast('Error: ' + result.message);
     }

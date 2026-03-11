@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('api', {
   openRepo: (url) => ipcRenderer.invoke('open-repo', url),
 
   getSystem: () => ipcRenderer.invoke('get-system'),
+  getUsage: () => ipcRenderer.invoke('get-usage'),
+  resetUsage: (id) => ipcRenderer.invoke('reset-usage', id),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
 
