@@ -106,6 +106,17 @@ const CATALOG = [
     requiresAdmin: true,
     features: ['Bandwidth QoS', 'CPU affinity', 'Memory caps', 'Speed test', 'Claude Code integration', 'Presets'],
   },
+  {
+    id: 'system-pulse',
+    name: 'System Pulse',
+    description: 'Real-time system diagnostics — CPU, memory, network monitoring, process management, health alerts.',
+    repo: 'https://github.com/Nimba-Solutions/System-Pulse',
+    packageName: 'system-pulse',
+    color: '#f59e0b',
+    icon: 'SP',
+    requiresAdmin: false,
+    features: ['CPU monitoring', 'Memory breakdown', 'Process table', 'Duplicate detection', 'Network stats', 'Diagnostics'],
+  },
 ];
 
 // --- Icon ---
