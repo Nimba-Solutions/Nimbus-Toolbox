@@ -7,7 +7,8 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec: _exec } = require('child_process');
+const guard = require('./process-guard');
 const Store = require('electron-store');
 
 const store = new Store({
@@ -271,7 +272,7 @@ function updateTool(toolPath) {
       return resolve({ updated: false, reason: 'not a git repo' });
     }
 
-    exec(`cd /d "${toolPath}" && git pull --ff-only 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+    guard.exec(`cd /d "${toolPath}" && git pull --ff-only 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
       if (err) {
         resolve({ updated: false, reason: err.message });
       } else if (stdout.includes('Already up to date')) {
@@ -303,7 +304,7 @@ async function launchTool(toolId) {
   // If updated, re-install deps in case package.json changed
   if (updateResult.updated) {
     await new Promise((resolve) => {
-      exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+      guard.exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
     });
     scanForTools(); // refresh tool list
   }
@@ -318,7 +319,7 @@ async function launchTool(toolId) {
   // Launch with electron
   return new Promise((resolve) => {
     const cmd = `cd /d "${tool.localPath}" && npx electron .`;
-    exec(cmd, { shell: true, windowsHide: false }, (err) => {
+    guard.exec(cmd, { shell: true, windowsHide: false }, (err) => {
       if (err) {
         resolve({ status: 'error', message: err.message });
       }
@@ -342,7 +343,7 @@ async function launchToolAdmin(toolId) {
   const updateResult = await updateTool(tool.localPath);
   if (updateResult.updated) {
     await new Promise((resolve) => {
-      exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+      guard.exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
     });
     scanForTools();
   }
@@ -361,7 +362,7 @@ async function launchToolAdmin(toolId) {
     fs.writeFileSync(batPath, batContent);
 
     const psCmd = `Start-Process cmd.exe -Verb RunAs -ArgumentList '/c "${batPath}"'`;
-    exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
+    guard.exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
       if (err) {
         resolve({ status: 'error', message: err.message });
         return;
@@ -385,7 +386,7 @@ async function openTerminal(toolId) {
   const tools = store.get('tools', []);
   const tool = tools.find(t => t.id === toolId);
   if (tool && tool.localPath) {
-    exec(`start cmd.exe /k "cd /d ${tool.localPath}"`, { shell: true });
+    guard.exec(`start cmd.exe /k "cd /d ${tool.localPath}"`, { shell: true });
     return { status: 'ok' };
   }
   return { status: 'error', message: 'Not installed' };
@@ -399,7 +400,7 @@ async function installDeps(toolId) {
   }
 
   return new Promise((resolve) => {
-    exec(`cd /d "${tool.localPath}" && npm install`, { shell: true, windowsHide: true, timeout: 120000 }, (err, stdout, stderr) => {
+    guard.exec(`cd /d "${tool.localPath}" && npm install`, { shell: true, windowsHide: true, timeout: 120000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ status: 'error', message: stderr || err.message });
       } else {
@@ -419,7 +420,7 @@ async function buildTool(toolId) {
   }
 
   return new Promise((resolve) => {
-    exec(`cd /d "${tool.localPath}" && npm run build`, { shell: true, windowsHide: true, timeout: 300000 }, (err, stdout, stderr) => {
+    guard.exec(`cd /d "${tool.localPath}" && npm run build`, { shell: true, windowsHide: true, timeout: 300000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ status: 'error', message: stderr || err.message });
       } else {
@@ -444,7 +445,7 @@ async function cloneTool(toolId) {
   }
 
   return new Promise((resolve) => {
-    exec(`git clone ${cat.repo}.git "${fullPath}"`, { shell: true, windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
+    guard.exec(`git clone ${cat.repo}.git "${fullPath}"`, { shell: true, windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ status: 'error', message: stderr || err.message });
       } else {
@@ -554,7 +555,7 @@ function checkSelfUpdate() {
 
   return new Promise((resolve) => {
     // Fetch remote and check if we're behind
-    exec(`cd /d "${toolboxDir}" && git fetch origin 2>&1 && git rev-list HEAD..origin/master --count 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+    guard.exec(`cd /d "${toolboxDir}" && git fetch origin 2>&1 && git rev-list HEAD..origin/master --count 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
       if (err) return resolve({ available: false, reason: err.message });
       const lines = stdout.trim().split('\n');
       const behind = parseInt(lines[lines.length - 1]) || 0;
@@ -572,7 +573,7 @@ ipcMain.handle('self-update', async () => {
 
   // Re-install deps if needed
   await new Promise((resolve) => {
-    exec(`cd /d "${toolboxDir}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+    guard.exec(`cd /d "${toolboxDir}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
   });
 
   return { status: 'updated', output: result.output };
@@ -584,9 +585,27 @@ ipcMain.handle('restart-app', () => {
   app.quit();
 });
 
+// --- Single instance lock ---
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+}
+
 // --- App lifecycle ---
 
+if (gotLock) {
 app.whenReady().then(() => {
+  guard.init(app);
   createTray();
 
   // Initial scan
@@ -604,7 +623,8 @@ app.whenReady().then(() => {
     createWindow();
   }
 });
+}
 
 app.on('window-all-closed', () => { /* keep running in tray */ });
-app.on('activate', () => createWindow());
+app.on('activate', () => { if (gotLock) createWindow(); });
 app.on('before-quit', () => { app.isQuitting = true; });
