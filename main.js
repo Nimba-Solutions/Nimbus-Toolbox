@@ -11,6 +11,10 @@ const { exec: _exec } = require('child_process');
 const guard = require('./process-guard');
 const Store = require('electron-store');
 
+const platform = process.platform; // 'win32', 'darwin', 'linux'
+const isWin = platform === 'win32';
+const isMac = platform === 'darwin';
+
 const store = new Store({
   defaults: {
     tools: [],        // discovered/registered tools
@@ -206,14 +210,18 @@ function createTray() {
 // --- Tool scanning ---
 
 function getDefaultScanPaths() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  return [
+  const home = isWin
+    ? (process.env.USERPROFILE || process.env.HOME || '')
+    : (process.env.HOME || '');
+  const candidates = [
     path.join(home, 'Projects'),
-    'C:\\Projects',
     path.join(home, 'Desktop'),
     path.join(home, 'Documents'),
     path.dirname(app.getAppPath()),  // same directory as toolbox
-  ].filter(p => {
+  ];
+  // Windows-only legacy path
+  if (isWin) candidates.splice(1, 0, 'C:\\Projects');
+  return candidates.filter(p => {
     try { return fs.existsSync(p); } catch { return false; }
   });
 }
@@ -280,7 +288,8 @@ function updateTool(toolPath) {
       return resolve({ updated: false, reason: 'not a git repo' });
     }
 
-    guard.exec(`cd /d "${toolPath}" && git pull --ff-only 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+    const cdCmd = isWin ? `cd /d "${toolPath}"` : `cd "${toolPath}"`;
+    guard.exec(`${cdCmd} && git pull --ff-only 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
       if (err) {
         resolve({ updated: false, reason: err.message });
       } else if (stdout.includes('Already up to date')) {
@@ -311,8 +320,9 @@ async function launchTool(toolId) {
 
   // If updated, re-install deps in case package.json changed
   if (updateResult.updated) {
+    const cdCmd = isWin ? `cd /d "${tool.localPath}"` : `cd "${tool.localPath}"`;
     await new Promise((resolve) => {
-      guard.exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+      guard.exec(`${cdCmd} && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
     });
     scanForTools(); // refresh tool list
   }
@@ -326,7 +336,8 @@ async function launchTool(toolId) {
 
   // Launch with electron
   return new Promise((resolve) => {
-    const cmd = `cd /d "${tool.localPath}" && npx electron .`;
+    const cdCmd = isWin ? `cd /d "${tool.localPath}"` : `cd "${tool.localPath}"`;
+    const cmd = `${cdCmd} && npx electron .`;
     guard.exec(cmd, { shell: true, windowsHide: false }, (err) => {
       if (err) {
         resolve({ status: 'error', message: err.message });
@@ -350,8 +361,9 @@ async function launchToolAdmin(toolId) {
   // Auto-update before launch
   const updateResult = await updateTool(tool.localPath);
   if (updateResult.updated) {
+    const cdCmd = isWin ? `cd /d "${tool.localPath}"` : `cd "${tool.localPath}"`;
     await new Promise((resolve) => {
-      guard.exec(`cd /d "${tool.localPath}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+      guard.exec(`${cdCmd} && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
     });
     scanForTools();
   }
@@ -363,19 +375,47 @@ async function launchToolAdmin(toolId) {
   usage[toolId].lastLaunched = new Date().toISOString();
   store.set('usage', usage);
 
-  // Launch elevated: write a temp .bat and use Start-Process -Verb RunAs on it
+  // Launch elevated (platform-specific)
   return new Promise((resolve) => {
-    const batPath = path.join(app.getPath('temp'), `nimbus-admin-${toolId}.bat`);
-    const batContent = `@echo off\r\ncd /d "${tool.localPath}"\r\nnpx electron .\r\n`;
-    fs.writeFileSync(batPath, batContent);
+    if (isWin) {
+      // Windows: write a temp .bat and use Start-Process -Verb RunAs on it
+      const batPath = path.join(app.getPath('temp'), `nimbus-admin-${toolId}.bat`);
+      const batContent = `@echo off\r\ncd /d "${tool.localPath}"\r\nnpx electron .\r\n`;
+      fs.writeFileSync(batPath, batContent);
 
-    const psCmd = `Start-Process cmd.exe -Verb RunAs -ArgumentList '/c "${batPath}"'`;
-    guard.exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
-      if (err) {
-        resolve({ status: 'error', message: err.message });
-        return;
-      }
-    });
+      const psCmd = `Start-Process cmd.exe -Verb RunAs -ArgumentList '/c "${batPath}"'`;
+      guard.exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd.replace(/"/g, '\\"')}"`, { shell: true, windowsHide: true }, (err) => {
+        if (err) {
+          resolve({ status: 'error', message: err.message });
+          return;
+        }
+      });
+    } else if (isMac) {
+      // macOS: write a temp .sh and use osascript to run with admin privileges
+      const shPath = path.join(app.getPath('temp'), `nimbus-admin-${toolId}.sh`);
+      const shContent = `#!/bin/bash\ncd "${tool.localPath}"\nnpx electron .\n`;
+      fs.writeFileSync(shPath, shContent, { mode: 0o755 });
+
+      const escapedPath = shPath.replace(/"/g, '\\"');
+      guard.exec(`osascript -e 'do shell script "bash \\"${escapedPath}\\"" with administrator privileges'`, { shell: '/bin/bash' }, (err) => {
+        if (err) {
+          resolve({ status: 'error', message: err.message });
+          return;
+        }
+      });
+    } else {
+      // Linux: use pkexec for graphical sudo
+      const shPath = path.join(app.getPath('temp'), `nimbus-admin-${toolId}.sh`);
+      const shContent = `#!/bin/bash\ncd "${tool.localPath}"\nnpx electron .\n`;
+      fs.writeFileSync(shPath, shContent, { mode: 0o755 });
+
+      guard.exec(`pkexec bash "${shPath}"`, { shell: true }, (err) => {
+        if (err) {
+          resolve({ status: 'error', message: err.message });
+          return;
+        }
+      });
+    }
     setTimeout(() => resolve({ status: 'ok', name: tool.name, admin: true, updated: updateResult.updated }), 1500);
   });
 }
@@ -394,7 +434,16 @@ async function openTerminal(toolId) {
   const tools = store.get('tools', []);
   const tool = tools.find(t => t.id === toolId);
   if (tool && tool.localPath) {
-    guard.exec(`start cmd.exe /k "cd /d ${tool.localPath}"`, { shell: true });
+    if (isWin) {
+      guard.exec(`start cmd.exe /k "cd /d ${tool.localPath}"`, { shell: true });
+    } else if (isMac) {
+      const escaped = tool.localPath.replace(/'/g, "'\\''");
+      guard.exec(`open -a Terminal "${tool.localPath}"`, { shell: '/bin/bash' });
+    } else {
+      // Linux: try common terminal emulators
+      const escaped = tool.localPath.replace(/'/g, "'\\''");
+      guard.exec(`x-terminal-emulator --working-directory='${escaped}' 2>/dev/null || xterm -e 'cd "${escaped}" && bash' 2>/dev/null`, { shell: '/bin/bash' });
+    }
     return { status: 'ok' };
   }
   return { status: 'error', message: 'Not installed' };
@@ -408,7 +457,8 @@ async function installDeps(toolId) {
   }
 
   return new Promise((resolve) => {
-    guard.exec(`cd /d "${tool.localPath}" && npm install`, { shell: true, windowsHide: true, timeout: 120000 }, (err, stdout, stderr) => {
+    const cdCmd = isWin ? `cd /d "${tool.localPath}"` : `cd "${tool.localPath}"`;
+    guard.exec(`${cdCmd} && npm install`, { shell: true, windowsHide: true, timeout: 120000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ status: 'error', message: stderr || err.message });
       } else {
@@ -428,7 +478,8 @@ async function buildTool(toolId) {
   }
 
   return new Promise((resolve) => {
-    guard.exec(`cd /d "${tool.localPath}" && npm run build`, { shell: true, windowsHide: true, timeout: 300000 }, (err, stdout, stderr) => {
+    const cdCmd = isWin ? `cd /d "${tool.localPath}"` : `cd "${tool.localPath}"`;
+    guard.exec(`${cdCmd} && npm run build`, { shell: true, windowsHide: true, timeout: 300000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ status: 'error', message: stderr || err.message });
       } else {
@@ -444,7 +495,9 @@ async function cloneTool(toolId) {
   if (!cat) return { status: 'error', message: 'Unknown tool' };
 
   const scanPaths = getDefaultScanPaths();
-  const targetDir = scanPaths.find(p => p.includes('Projects')) || scanPaths[0] || 'C:\\Projects';
+  const home = isWin ? (process.env.USERPROFILE || '') : (process.env.HOME || '');
+  const fallbackDir = isWin ? 'C:\\Projects' : path.join(home, 'Projects');
+  const targetDir = scanPaths.find(p => p.includes('Projects')) || scanPaths[0] || fallbackDir;
   const folderName = cat.name.replace(/\s+/g, '-').toLowerCase();
   const fullPath = path.join(targetDir, folderName);
 
@@ -563,7 +616,8 @@ function checkSelfUpdate() {
 
   return new Promise((resolve) => {
     // Fetch remote and check if we're behind
-    guard.exec(`cd /d "${toolboxDir}" && git fetch origin 2>&1 && git rev-list HEAD..origin/master --count 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
+    const cdCmd = isWin ? `cd /d "${toolboxDir}"` : `cd "${toolboxDir}"`;
+    guard.exec(`${cdCmd} && git fetch origin 2>&1 && git rev-list HEAD..origin/master --count 2>&1`, { shell: true, windowsHide: true, timeout: 15000 }, (err, stdout) => {
       if (err) return resolve({ available: false, reason: err.message });
       const lines = stdout.trim().split('\n');
       const behind = parseInt(lines[lines.length - 1]) || 0;
@@ -580,8 +634,9 @@ ipcMain.handle('self-update', async () => {
   if (!result.updated) return { status: 'no-update', reason: result.reason };
 
   // Re-install deps if needed
+  const cdCmd = isWin ? `cd /d "${toolboxDir}"` : `cd "${toolboxDir}"`;
   await new Promise((resolve) => {
-    guard.exec(`cd /d "${toolboxDir}" && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
+    guard.exec(`${cdCmd} && npm install --production`, { shell: true, windowsHide: true, timeout: 60000 }, () => resolve());
   });
 
   return { status: 'updated', output: result.output };
