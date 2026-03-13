@@ -118,6 +118,14 @@ const CATALOG = [
     requiresAdmin: false,
     features: ['CPU monitoring', 'Memory breakdown', 'Process table', 'Duplicate detection', 'Network stats', 'Diagnostics'],
   },
+  {
+    id: 'game-governor',
+    name: 'Game Governor',
+    description: 'Gaming performance optimizer — monitor lag, auto-optimize, detect issues',
+    packageName: 'game-governor',
+    requiresAdmin: true,
+    features: ['Game Mode', 'Lag Detection', 'Auto-Optimize', 'Network Monitor', 'Process Killer', 'Cloud Dashboard'],
+  },
 ];
 
 // --- Icon ---
